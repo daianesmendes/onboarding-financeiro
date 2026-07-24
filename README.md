@@ -1,4 +1,4 @@
-# Onboarding Financeiro Automatizado - Pós-Assinatura do Cliente (n8n)
+# Onboarding Financeiro Automatizado - Pós-Assinatura (n8n)
 
 Automação que assume o cliente **no momento em que ele assina o contrato** e faz todo o
 cadastro financeiro sozinha: valida o contrato, enriquece os dados na Receita, confirma
