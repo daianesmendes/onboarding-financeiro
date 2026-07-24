@@ -2,7 +2,7 @@
 
 Automação que assume o cliente **no momento em que ele assina o contrato** e faz todo o
 cadastro financeiro sozinha: valida o contrato, enriquece os dados na Receita, confirma
-com um humano e cadastra cliente + assinatura no ERP de cobrança — anexando tudo no CRM.
+com um humano e cadastra cliente + assinatura no ERP de cobrança, anexando tudo no CRM.
 
 Construído em **n8n**, integra 6 sistemas externos numa única esteira, com **validação
 humana** no meio e **geração de documentos** sob demanda.
