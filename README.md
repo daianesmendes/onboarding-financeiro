@@ -92,8 +92,3 @@ validação deve chegar ao financeiro antes de qualquer cadastro no ERP.
 ## Stack
 
 `n8n` · `D4Sign` · `cnpja` · `SQL Server` · `Superlógica` · `Pipedrive` · `Gmail`
-
-## Status
-
-Projeto de referência / estudo, extraído de um ambiente real e sanitizado. Serve como
-base de arquitetura de integração e processamento de documentos — adapte ao seu cenário.
