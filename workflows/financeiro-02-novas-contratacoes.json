@@ -1,0 +1,1302 @@
+{
+  "name": "Financeiro - Novas contratações",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Validação de contrato\n\nDispara quando o D4Sign avisa que um documento foi assinado.\n\n**Validação:**\n1) Filtra: só segue se quem assinou foi o CLIENTE.\n2) Baixa o PDF, valida proposta, extrai CNPJ e endereço.\n3) cnpja (sócios / ativa / endereço) + banco (pendência).\n4) Busca as propostas do cliente (1º por e-mail; se não achar, por razão social).\n5) E-mail ao financeiro com as validações + lista de propostas e AGUARDA a resposta com o ID da proposta.",
+        "height": 284,
+        "width": 532
+      },
+      "id": "dcadb121-0547-4c78-8f51-ec416b561d57",
+      "name": "LEIA-ME",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1168,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "d4sign-assinatura",
+        "options": {}
+      },
+      "id": "a53573cf-f991-4e84-abd5-e0d7ff9b4930",
+      "name": "Webhook D4Sign (assinatura)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1184,
+        1952
+      ],
+      "webhookId": "d4sign-assinatura"
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || $input.first().json;\nconst uuid = (b.uuid || '').toString();\nconst typePost = (b.type_post || '').toString();\nconst message = (b.message || '').toString();\nconst signerEmail = (b.email || '').toString().toLowerCase().trim();\n\n// Evento de assinatura individual (\"Signed\" / type_post 4) — traz o e-mail de quem assinou\nconst ehAssinatura = typePost === '4' || /signed|assinad/i.test(message);\n\n// Cliente = e-mail que NÃO é @example.com (internos: financeiro, pos-venda, etc.)\nconst ehCliente = !!signerEmail && !/@example\\.com$/i.test(signerEmail);\n\n// Dedupe: 1 e-mail por documento (se o contrato tiver mais de 1 assinante do cliente)\nconst staticData = $getWorkflowStaticData('global');\nconst processados = staticData.processados || {};\nconst jaProcessado = !!(uuid && processados[uuid]);\n\nconst processar = ehAssinatura && ehCliente && !jaProcessado;\nif (processar) { processados[uuid] = true; staticData.processados = processados; }\n\nreturn [{ json: { uuid, typePost, message, signerEmail, ehAssinatura, ehCliente, jaProcessado, processar } }];"
+      },
+      "id": "0e290768-e56c-448b-89c6-b08cb93b2342",
+      "name": "Parse evento + filtro cliente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        1952
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.processar }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e3469f7a-2e42-40ca-9896-5aa00c6a71a9",
+      "name": "Foi o cliente?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        1952
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "95576024-8c1a-48e2-901c-120536827e3b",
+      "name": "Ignorar (interno/evento)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -288,
+        2112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://secure.d4sign.com.br/api/v1/documents/{{ $json.uuid }}/download",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"pdf\"\n}",
+        "options": {}
+      },
+      "id": "6a02d9f0-b283-4490-95c7-45622de48441",
+      "name": "D4Sign: pega URL do PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -288,
+        1808
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "CRED_D4SIGN",
+          "name": "D4Sign API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "28fa9940-7b79-4c38-ab94-beef0f62bb60",
+      "name": "Baixa o PDF (binario)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -64,
+        1808
+      ],
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "id": "7e1d58d8-8088-42ab-a97c-4d4bc3eae119",
+      "name": "Extrai texto do PDF",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        144,
+        1808
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const texto = ($input.first().json.text || \"\").toUpperCase();\nconst textoOrig = $input.first().json.text || \"\";\nconst PALAVRAS = [\n  \"PROPOSTA COMERCIAL\",\n  \"ACEITE DA PROPOSTA\",\n  \"DO FORO\",\n  \"DO PRAZO E RESCIS\",\n  \"TAXA DE ADES\",\n  \"TREINAMENTO E SUPORTE\",\n  \"DETALHES DA CONTRATA\",\n  \"VALIDADE DA PROPOSTA\",\n  \"OBSERVA\",\n  \"DADOS DA CONTRATA\",\n  \"VALORES DE CONTRATA\",\n  \"ADES\",\n  \"FUNCIONALIDADES DO SISTEMA\",\n  \"FUNCIONALIDADES DO PLANO\",\n];\nconst faltando = PALAVRAS.filter((p) => !texto.includes(p));\nconst propostaOk = faltando.length === 0;\nconst m = texto.replace(/[^0-9]/g, \" \").match(/\\b(\\d{14})\\b/);\nconst cnpj = m ? m[1] : \"\";\nlet enderecoPdf = \"\";\nconst emd = texto.match(/ENDERE[CÇ]O:?(.*?)(CIDADE:|UF:|CEP:|$)/s);\nif (emd) enderecoPdf = emd[1].replace(/\\s+/g, \" \").trim();\nconst mr = texto.match(/RAZ[ÃA]O SOCIAL\\s*:?\\s*([^\\n]+)/);\nconst razaoPdf = mr ? mr[1].trim() : \"\";\nfunction normTel(s) {\n  let d = String(s || \"\").replace(/\\D/g, \"\");\n  if (d.length > 11 && d.startsWith(\"55\")) d = d.slice(2);\n  d = d.replace(/^0+/, \"\");\n  return d;\n}\nlet emailBoleto = \"\";\nconst mb = textoOrig.match(\n  /RECEBER OS BOLETOS[\\s\\S]{0,250}?e-?mail\\s*:?\\s*([^\\s]+@[^\\s]+)/i,\n);\nif (mb)\n  emailBoleto = mb[1]\n    .trim()\n    .toLowerCase()\n    .replace(/[^a-z0-9@._+-]/g, \"\");\nlet telBoleto = \"\";\nconst mtb = textoOrig.match(\n  /RECEBER OS BOLETOS[\\s\\S]{0,300}?(?:celular|telefone|cel|fone)\\s*:?\\s*\\+?([\\d().\\s-]{8,})/i,\n);\nif (mtb) telBoleto = normTel(mtb[1]);\nconst blocosEmail = [\n  /RESPONS[ÁA]VEL PELO CONTRATO[\\s\\S]{0,300}?e-?mail\\s*:?\\s*([^\\s]+@[^\\s]+)/i,\n  /RECEBER OS BOLETOS[\\s\\S]{0,300}?e-?mail\\s*:?\\s*([^\\s]+@[^\\s]+)/i,\n  /IMPLANTA[ÇC][ÃA]O DO SISTEMA[\\s\\S]{0,300}?e-?mail\\s*:?\\s*([^\\s]+@[^\\s]+)/i,\n];\nlet emailsPdf = [];\nfor (const rx of blocosEmail) {\n  const mm = textoOrig.match(rx);\n  if (mm) emailsPdf.push(mm[1].toLowerCase().replace(/[^a-z0-9@._+-]/g, \"\"));\n}\nemailsPdf = Array.from(new Set(emailsPdf)).filter(\n  (e) => e && !/@example\\.com$/i.test(e),\n);\nlet telefonesPdf = [];\nconst labelsTel = [\n  /RESPONS[ÁA]VEL PELO CONTRATO/i,\n  /RECEBER OS BOLETOS/i,\n  /IMPLANTA[ÇC][ÃA]O DO SISTEMA/i,\n];\nfor (const lab of labelsTel) {\n  const idx = textoOrig.search(lab);\n  if (idx < 0) continue;\n  const bloco = textoOrig.slice(idx, idx + 350);\n  const fones =\n    bloco.match(/(?:telefone|celular|cel|fone)\\s*:?\\s*\\+?[\\d()\\s.-]{8,}/gi) ||\n    [];\n  for (const f of fones) {\n    const d = normTel(f);\n    if (d.length >= 10) telefonesPdf.push(d);\n  }\n}\ntelefonesPdf = Array.from(new Set(telefonesPdf));\nconst freeMail = [\n  \"gmail.com\",\n  \"hotmail.com\",\n  \"outlook.com\",\n  \"outlook.com.br\",\n  \"hotmail.com.br\",\n  \"yahoo.com\",\n  \"yahoo.com.br\",\n  \"icloud.com\",\n  \"bol.com.br\",\n  \"uol.com.br\",\n  \"terra.com.br\",\n  \"live.com\",\n  \"msn.com\",\n  \"ig.com.br\",\n  \"globo.com\",\n  \"r7.com\",\n  \"me.com\",\n  \"protonmail.com\",\n];\nconst dominiosPdf = Array.from(\n  new Set(\n    emailsPdf\n      .map((e) => (e.split(\"@\")[1] || \"\").toLowerCase())\n      .filter((d) => d && !freeMail.includes(d) && !/example\\.com/i.test(d)),\n  ),\n);\n// Vendedor (Representante comercial no contrato)\nlet vendedor = \"\";\nconst mv = textoOrig.match(/([^\\n]{2,60}?)\\s*\\r?\\n\\s*Representante comercial/i);\nif (mv) vendedor = mv[1].replace(/^[\\s•*\\-]+/, \"\").trim();\nreturn [\n  {\n    json: {\n      propostaOk,\n      palavrasFaltando: faltando,\n      cnpj,\n      enderecoPdf,\n      razaoPdf,\n      emailBoleto,\n      telBoleto,\n      emailsPdf,\n      telefonesPdf,\n      dominiosPdf,\n      vendedor,\n    },\n  },\n];"
+      },
+      "id": "a1a39753-dd80-4ce9-892a-c31767d61e6c",
+      "name": "Valida proposta + extrai CNPJ",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        1808
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://open.cnpja.com/office/{{ $json.cnpj }}",
+        "options": {}
+      },
+      "id": "16e575e2-7260-49cb-bae2-9ee5be0dc2a5",
+      "name": "Consulta cnpja",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        816,
+        1680
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- JOIN com a tabela empresa para trazer o CNPJ (campo cnpj_cpf).\n-- Liga pelo id 'empresa' (presente na view e na tabela). Pesquisa pelo CNPJ (so digitos).\nSELECT TOP 1 b.*, e.cnpj_cpf AS cnpj\nFROM view_empresa_bill b\nINNER JOIN empresa e ON e.empresa = b.empresa\nWHERE e.cnpj_cpf = '{{ $('Valida proposta + extrai CNPJ').first().json.cnpj }}'\nORDER BY 1 DESC",
+        "options": {}
+      },
+      "id": "94bf7427-1cb2-4fc1-9ab6-670b9c293fa7",
+      "name": "view_empresa_bill",
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        1664
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "microsoftSql": {
+          "id": "CRED_MSSQL",
+          "name": "SQL Server (ERP)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://secure.d4sign.com.br/api/v1/documents/{{ $('Parse evento + filtro cliente').first().json.uuid }}/list",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {}
+      },
+      "id": "1c866a3f-0b3c-426d-a0f8-2053d387273c",
+      "name": "D4Sign: lista signatarios",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1264,
+        1664
+      ],
+      "alwaysOutputData": false,
+      "executeOnce": false,
+      "retryOnFail": true,
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "CRED_D4SIGN",
+          "name": "D4Sign API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "sendTo": "financeiro@example.com",
+        "subject": "={{ $json.assunto }}",
+        "message": "={{ $json.html }}",
+        "responseType": "freeText",
+        "options": {
+          "messageButtonLabel": "Clique aqui para adicionar o ID da proposta",
+          "responseFormButtonLabel": "Enviar",
+          "limitWaitTime": {
+            "values": {
+              "resumeAmount": 4,
+              "resumeUnit": "days"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2736,
+        1664
+      ],
+      "id": "5f934577-7442-4981-a118-6f918af5c467",
+      "name": "Envia validação ao financeiro",
+      "webhookId": "06bb82b7-1abd-4e92-8e13-2da813428c92",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CRED_GMAIL",
+          "name": "Gmail (financeiro)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $('D4Sign: lista signatarios').all().map(i=>i.json);\nlet signers=[]; for(const r of raw){ if(!r) continue; if(Array.isArray(r.list)) signers.push(...r.list); else if(r.user_name) signers.push(r); else if(Array.isArray(r)) signers.push(...r); }\nconst cliente = signers.find(s => s && s.email && !/@example\\.com$/i.test((s.email||'').trim()));\nlet razao=''; try{ razao=$('Valida proposta + extrai CNPJ').first().json.razaoPdf||''; }catch(e){}\nif(!razao){ try{ razao=((($('Consulta cnpja').first().json)||{}).company||{}).name||''; }catch(e){} }\nrazao=String(razao).replace(/'/g,'').trim();\nconst stop=['LTDA','ME','EPP','SA','EIRELI','EIRELLI','DE','DA','DO','DOS','DAS','E','&','-'];\nconst limpa=razao.normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9 ]/g,' ');\nconst palavras=limpa.split(/\\s+/).filter(w=>w.length>=3 && !stop.includes(w));\nconst razao_busca=(palavras[0]||'').replace(/'/g,'');\nlet emailsPdf=[], telefonesPdf=[], dominiosPdf=[];\ntry{ const v=$('Valida proposta + extrai CNPJ').first().json; emailsPdf=v.emailsPdf||[]; telefonesPdf=v.telefonesPdf||[]; dominiosPdf=v.dominiosPdf||[]; }catch(e){}\nif(cliente && cliente.email) emailsPdf.push(cliente.email.toLowerCase().trim());\nemailsPdf=Array.from(new Set(emailsPdf.map(e=>String(e||'').toLowerCase().trim()))).filter(Boolean);\nconst emailsIn=emailsPdf.map(e=>\"'\"+e.replace(/'/g,'')+\"'\").join(',')||\"''\";\nconst telClean=\"p.cliente_pipedrive_pessoa_telefone\";\nconst telefonesLike=telefonesPdf.length ? telefonesPdf.map(t=>telClean+\" LIKE '%\"+String(t).replace(/\\D/g,'').slice(-8)+\"%'\").join(' OR ') : \"1=0\";\nconst dominiosLike=dominiosPdf.length ? dominiosPdf.map(d=>\"p.cliente_pipedrive_pessoa_email LIKE '%@\"+String(d).replace(/'/g,'')+\"'\").join(' OR ') : \"1=0\";\nreturn [{ json: { email_cliente: cliente?cliente.email.toLowerCase().trim():'', razao, razao_busca, emailsPdf, emailsIn, telefonesPdf, telefonesLike, dominiosPdf, dominiosLike } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1488,
+        1664
+      ],
+      "id": "116a1e26-555c-4109-aedb-100437eff93c",
+      "name": "Pega e-mail do cliente"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT p.gpc_proposta_comercial AS id, pl.nome AS plano, p.plano_valor_final AS valor,\n       p.cliente_pipedrive_organizacao AS organizacao, p.cliente_pipedrive_pessoa_email AS email,\n       p.cliente_pipedrive_pessoa_telefone AS telefone,\n       p.dt_hora AS data, p.status AS status_id, p.cliente_pipedrive_pessoa_id AS deal_id\nFROM gpc_proposta_comercial p\nLEFT JOIN plano pl ON pl.plano = p.plano\nWHERE p.cliente_pipedrive_pessoa_email IN ({{ $('Pega e-mail do cliente').first().json.emailsIn }})\n   OR ( {{ $('Pega e-mail do cliente').first().json.telefonesLike }} )\n   OR ( '{{ $('Pega e-mail do cliente').first().json.razao_busca }}' <> '' AND p.cliente_pipedrive_organizacao LIKE '%{{ $('Pega e-mail do cliente').first().json.razao_busca }}%' )\nORDER BY p.dt_hora DESC",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        1696,
+        1664
+      ],
+      "id": "a9271443-4a23-4ad3-a6fa-735e73760577",
+      "name": "Busca propostas do cliente",
+      "alwaysOutputData": true,
+      "credentials": {
+        "microsoftSql": {
+          "id": "CRED_MSSQL",
+          "name": "SQL Server (ERP)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json || {};\nlet t = '';\nif (r.data && typeof r.data.text === 'string') t = r.data.text;\nelse if (typeof r.text === 'string') t = r.text;\nelse if (typeof r.data === 'string') t = r.data;\nconst m = String(t).match(/\\d{1,7}/);\nconst proposta_id = m ? m[0] : '';\nlet cnpj = '';\ntry { cnpj = String($('Valida proposta + extrai CNPJ').first().json.cnpj || '').replace(/\\D/g,''); } catch(e) {}\nreturn [{ json: { proposta_id, cnpj } }];"
+      },
+      "id": "92e77a06-e497-4bfb-a3d8-791d9cc96b28",
+      "name": "Lê resposta (ID proposta)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2960,
+        1664
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.proposta_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4fb4c4e1-8bc2-44b3-a938-cdb201e8553c",
+      "name": "Tem ID da proposta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3184,
+        1664
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "92db2200-7701-410d-99d2-77cdafb66a6e",
+      "name": "Ignorar (sem ID)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3424,
+        1824
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT TOP 1\n  p.gpc_proposta_comercial AS proposta_id,\n  p.cliente_pipedrive_pessoa_id AS deal_id,\n  p.cliente_pipedrive_organizacao AS organizacao,\n  p.cliente_pipedrive_pessoa_nome AS contato_nome,\n  p.cliente_pipedrive_pessoa_email AS contato_email,\n  p.cliente_pipedrive_pessoa_telefone AS contato_telefone,\n  p.plano AS plano_id, pl.nome AS plano_nome,\n  p.plano_valor_final, p.plano_dia_vencimento, p.plano_periodicidade,\n  p.plano_quantidade_parcela, p.plano_forma_pagamento,\n  p.adesao_valor_final, p.adesao_quantidade_parcela, p.plano_extra_valor, p.status\nFROM gpc_proposta_comercial p\nLEFT JOIN plano pl ON pl.plano = p.plano\nWHERE p.gpc_proposta_comercial = {{ $('Lê resposta (ID proposta)').first().json.proposta_id }}",
+        "options": {}
+      },
+      "id": "ff22eb75-b158-4b45-a26a-9f05fa4fa86c",
+      "name": "Busca proposta cadastro",
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        3424,
+        1520
+      ],
+      "credentials": {
+        "microsoftSql": {
+          "id": "CRED_MSSQL",
+          "name": "SQL Server (ERP)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT e.plano AS plano_id, pl.nome AS plano_nome, e.valor\nFROM gpc_proposta_comercial_plano_extra e\nLEFT JOIN plano pl ON pl.plano = e.plano\nWHERE e.gpc_proposta_comercial = {{ $('Lê resposta (ID proposta)').first().json.proposta_id }} AND e.valor > 0",
+        "options": {}
+      },
+      "id": "ffe2e679-3f31-4c62-b640-4094f3a6aa59",
+      "name": "Busca extras cadastro",
+      "type": "n8n-nodes-base.microsoftSql",
+      "typeVersion": 1.1,
+      "position": [
+        3648,
+        1520
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "microsoftSql": {
+          "id": "CRED_MSSQL",
+          "name": "SQL Server (ERP)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prop = $('Busca proposta cadastro').first().json;\nconst extras = $('Busca extras cadastro').all().map(i => i.json).filter(e => e && e.plano_id);\nlet cnpja = {}; try { cnpja = $('Consulta cnpja').first().json || {}; } catch(e) {}\nconst cnpj = $('Lê resposta (ID proposta)').first().json.cnpj;\n\n// e-mail + celular de quem recebe os boletos (do contrato)\nlet emailBoleto = '', telBoleto = '';\ntry { const v = $('Valida proposta + extrai CNPJ').first().json; emailBoleto = v.emailBoleto || ''; telBoleto = v.telBoleto || ''; } catch(e) {}\n\n// Telefone (de cima): da proposta, separado em DDD + numero\nlet telDig = String(prop.contato_telefone || '').replace(/\\D/g,'');\nif (telDig.length > 11 && telDig.startsWith('55')) telDig = telDig.slice(2);\nconst ddd = telDig.length >= 10 ? telDig.slice(0,2) : '';\nconst telefone = telDig.length >= 10 ? telDig.slice(2) : telDig;\n// Celular (de baixo): de quem recebe o boleto (DDD + numero juntos)\nconst celular = String(telBoleto || '').replace(/\\D/g,'');\n\nconst MODO_TESTE = false;\nconst achou = !MODO_TESTE && !!(cnpja && cnpja.company && cnpja.company.name);\nconst end = (achou && cnpja.address) ? cnpja.address : {};\nconst simples = achou ? !!(cnpja.company.simples && cnpja.company.simples.optant) : false;\nconst razao = achou ? cnpja.company.name : 'TESTE AUTOMACAO LTDA';\nconst fantasia = achou ? (cnpja.alias || razao) : 'TESTE AUTOMACAO';\nconst email = MODO_TESTE ? 'teste@example.com' : (emailBoleto || prop.contato_email || '');\n\nconst nome = (prop.plano_nome || '').toLowerCase();\nconst parcelas = Number(prop.plano_quantidade_parcela) || 0;\nconst periodicidade = Number(prop.plano_periodicidade) || 0;\nconst recorrente = parcelas === periodicidade || parcelas === 0 || periodicidade === 0;\nconst mapMensal = { 'da vinci':12, 'monet':10, 'munch':20, 'van gogh':11, 'michelangelo':15 };\nconst mapAvista = { 'da vinci':23, 'monet':33, 'munch':24 };\nfunction acha(map){ for (const k of Object.keys(map)) if (nome.includes(k)) return map[k]; return null; }\nlet idPlano = recorrente ? acha(mapMensal) : (acha(mapAvista) || acha(mapMensal));\nconst tipoPlano = recorrente ? 'recorrente (mensal)' : 'a vista';\nconst reterImpostos = simples ? 0 : 1;\n\nconst out = {\n  cnpj, cnpja_encontrou: achou,\n  cliente: { razao_social: razao, nome_fantasia: fantasia, cnpj, email,\n    ddd, telefone, celular,\n    dia_vencimento: prop.plano_dia_vencimento || 10,\n    logradouro: end.street || '', numero: String(end.number || ''), bairro: end.district || '',\n    cidade: end.city || '', uf: end.state || '', cep: String(end.zip || ''),\n    simples, fl_optante_simples: simples ? 1 : 0, reter_impostos: reterImpostos },\n  assinatura: { id_plano: idPlano, plano_nome_gpc: prop.plano_nome, tipo_plano: tipoPlano,\n    valor_negociado: prop.plano_valor_final, parcelas, periodicidade,\n    dia_vencimento: prop.plano_dia_vencimento || 10, notificar_cliente: 1 },\n  extras: extras.map(e => ({ plano_id: e.plano_id, nome: e.plano_nome, valor: e.valor })),\n  adesao: { valor: prop.adesao_valor_final, parcelas: prop.adesao_quantidade_parcela || 1 },\n  proposta_id: prop.proposta_id\n};\nreturn [{ json: out }];"
+      },
+      "id": "23d23e86-67a3-4323-b991-8edc0108184c",
+      "name": "Monta dados + de-para",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3872,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.superlogica.net/v2/financeiro/clientes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "ST_NOME_SAC",
+              "value": "={{ $json.cliente.razao_social }}"
+            },
+            {
+              "name": "ST_NOMEREF_SAC",
+              "value": "={{ $json.cliente.nome_fantasia }}"
+            },
+            {
+              "name": "ST_CGC_SAC",
+              "value": "={{ $json.cliente.cnpj }}"
+            },
+            {
+              "name": "ST_EMAIL_SAC",
+              "value": "={{ $json.cliente.email }}"
+            },
+            {
+              "name": "ST_DIAVENCIMENTO_SAC",
+              "value": "={{ $json.cliente.dia_vencimento }}"
+            },
+            {
+              "name": "ST_ENDERECO_SAC",
+              "value": "={{ $json.cliente.logradouro }}"
+            },
+            {
+              "name": "ST_NUMERO_SAC",
+              "value": "={{ $json.cliente.numero }}"
+            },
+            {
+              "name": "ST_BAIRRO_SAC",
+              "value": "={{ $json.cliente.bairro }}"
+            },
+            {
+              "name": "ST_CIDADE_SAC",
+              "value": "={{ $json.cliente.cidade }}"
+            },
+            {
+              "name": "ST_ESTADO_SAC",
+              "value": "={{ $json.cliente.uf }}"
+            },
+            {
+              "name": "ST_CEP_SAC",
+              "value": "={{ $json.cliente.cep }}"
+            },
+            {
+              "name": "FL_OPTANTESIMPLES_SAC",
+              "value": "={{ $json.cliente.fl_optante_simples }}"
+            },
+            {
+              "name": "FL_RETERIRRF_SAC",
+              "value": "1"
+            },
+            {
+              "name": "RETER_IMPOSTOS",
+              "value": "={{ $json.cliente.reter_impostos }}"
+            },
+            {
+              "name": "ST_TELEFONE_SAC",
+              "value": "={{ $json.cliente.telefone }}"
+            },
+            {
+              "name": "ST_DDD_SAC",
+              "value": "={{ $json.cliente.ddd }}"
+            },
+            {
+              "name": "ST_CELULAR_SAC",
+              "value": "={{ $json.cliente.celular }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f1916cab-088f-403f-bf04-1424709d78eb",
+      "name": "Cadastra cliente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4096,
+        1520
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "CRED_SUPERLOGICA",
+          "name": "Superlógica API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Monta o corpo da assinatura: base + extras + adesão como ITENS (OPCIONAIS)\nconst dados = $('Monta dados + de-para').first().json;\nconst cli = $('Cadastra cliente').first().json;\nconst idSacado = (cli.data && cli.data.id_sacado_sac) || cli.id_sacado_sac || (cli.data && cli.data[0] && cli.data[0].id_sacado_sac) || '';\n\nconst mapProd = {\n  'controle de estoque':14, 'nf-e':16, 'nfe':16, 'alçada':15, 'alcada':15,\n  'mão de obra':32, 'mao de obra':32, 'asaas':44, 'aplicativo':18, 'portal do cliente':17,\n  'bi personalizado':37, 'bancária':38, 'bancaria':38, 'gestão de tarefas':43, 'gestao de tarefas':43,\n  'contratos':42, 'orçafascio':40, 'orcafascio':40, 'pagamentos':41, 'cobrança':35, 'cobranca':35\n};\nfunction achaProd(n){ const s=(n||'').toLowerCase(); for(const k of Object.keys(mapProd)) if(s.includes(k)) return mapProd[k]; return null; }\n\nconst d = new Date();\nconst dt = String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0')+'/'+d.getFullYear();\n\nconst body = {};\nbody['PLANOS[0][ID_SACADO_SAC]'] = idSacado;\nbody['PLANOS[0][ID_PLANO_PLA]'] = dados.assinatura.id_plano;\nbody['PLANOS[0][DT_CONTRATO_PLC]'] = dt;\nbody['PLANOS[0][FL_NOTIFICARCLIENTE]'] = 1;\nbody['PLANOS[0][FL_MULTIPLO_COMPO]'] = 1;\nbody['PLANOS[0][QUANT_PARCELAS_ADESAO]'] = dados.adesao.parcelas || 1;\n\nlet i = 0;\nfunction add(prd, val, rec){\n  body['OPCIONAIS['+i+'][ID_PRODUTO_PRD]'] = prd;\n  body['OPCIONAIS['+i+'][SELECIONAR_PRODUTO]'] = 1;\n  body['OPCIONAIS['+i+'][NM_QNTD_PLP]'] = 1;\n  body['OPCIONAIS['+i+'][valor_unitario]'] = val;\n  body['OPCIONAIS['+i+'][FL_RECORRENTE_PLP]'] = rec;\n  i++;\n}\n\nadd(11, dados.assinatura.valor_negociado, 1);\nconst naoMapeados = [];\nfor (const ex of (dados.extras || [])) {\n  const p = achaProd(ex.nome);\n  if (p) add(p, ex.valor, 1); else naoMapeados.push(ex.nome);\n}\nif (Number(dados.adesao.valor) > 0) add(12, dados.adesao.valor, 0);\n\nconst parts = [];\nfor (const k in body) parts.push(encodeURIComponent(k)+'='+encodeURIComponent(body[k]));\n\nreturn [{ json: { raw: parts.join('&'), body, naoMapeados, id_sacado: idSacado } }];"
+      },
+      "id": "8ef49ec2-ed16-4f1c-8b37-0e110dbdf338",
+      "name": "Monta body assinatura",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4320,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.superlogica.net/v2/financeiro/assinaturas",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/x-www-form-urlencoded",
+        "body": "={{ $json.raw }}",
+        "options": {}
+      },
+      "id": "2e59dfd2-553b-4d71-8fb1-ae2e9400a3eb",
+      "name": "Cadastra assinatura (base+extras+adesao)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4544,
+        1520
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "CRED_SUPERLOGICA",
+          "name": "Superlógica API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const dados = $('Monta dados + de-para').first().json;\nconst corpo = $('Monta body assinatura').first().json;\nconst resp = $('Cadastra assinatura (base+extras+adesao)').first().json;\nconst d = (resp && resp.data) ? resp.data : (Array.isArray(resp) && resp[0] && resp[0].data) ? resp[0].data : {};\nconst idCli = d.id_sacado_sac || corpo.id_sacado || '';\nconst urlCliente = idCli ? 'https://suaempresa.superlogica.net/clients/financeiro/sacados/id/' + idCli : '';\n\nfunction fmt(v){ const n = Number(v||0); return 'R$ ' + n.toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2}); }\n\nconst extrasLinhas = (dados.extras||[]).map(e => `<p style=\"margin:2px 0;font-size:13px;\">• ${e.nome}: <strong>${fmt(e.valor)}</strong></p>`).join('');\nconst aviso = (corpo.naoMapeados && corpo.naoMapeados.length)\n  ? `<p style=\"color:#b00;margin:10px 0;font-size:13px;\">⚠️ Extras SEM de-para (não cadastrados): ${corpo.naoMapeados.join(', ')}</p>` : '';\n\nconst html = `\n<div style=\"max-width:560px;margin:0 auto;font-family:Arial,Helvetica,sans-serif;color:#2b2b2b;text-align:left;border:1px solid #e6e6e6;border-radius:8px;overflow:hidden;\">\n  <div style=\"background:#E8A317;padding:16px 20px;\">\n    <span style=\"color:#fff;font-size:18px;font-weight:bold;\">✅ Cliente cadastrado no Superlógica</span>\n  </div>\n  <div style=\"padding:20px;\">\n    <p style=\"margin:0 0 4px;font-size:15px;\"><strong>${dados.cliente.razao_social}</strong></p>\n    <p style=\"margin:0 0 2px;font-size:13px;color:#555;\">CNPJ: ${dados.cliente.cnpj}</p>\n    <p style=\"margin:0 0 2px;font-size:13px;color:#555;\">Plano: ${dados.assinatura.plano_nome_gpc} — ${dados.assinatura.tipo_plano}</p>\n    <p style=\"margin:0 0 2px;font-size:13px;color:#555;\">Superlógica ${d.id_sacado_sac || ''}</p> \n    <p style=\"margin:0 0 16px;font-size:13px;color:#555;\">Pipedrive ${$('Busca proposta cadastro').first().json.deal_id || ''}</p>\n    <table style=\"width:100%;border-collapse:collapse;background:#FCF6E8;border-radius:6px;margin-bottom:18px;\">\n      <tr><td style=\"padding:12px 14px;font-size:13px;color:#555;border-bottom:1px solid #e6e6e6;\">Mensalidade (recorrente)</td><td style=\"padding:12px 14px;font-size:15px;font-weight:bold;text-align:right;border-bottom:1px solid #e6e6e6;\">${fmt(d.vl_aproxrenovacao_plc)}</td></tr>\n      <tr><td style=\"padding:12px 14px;font-size:13px;color:#555;border-bottom:1px solid #e6e6e6;\">Taxa de adesão (uma vez)</td><td style=\"padding:12px 14px;font-size:14px;text-align:right;border-bottom:1px solid #e6e6e6;\">${fmt(dados.adesao.valor)}</td></tr>\n      <tr><td style=\"padding:12px 14px;font-size:13px;color:#555;\">1º boleto</td><td style=\"padding:12px 14px;font-size:14px;font-weight:bold;text-align:right;color:#E8A317;\">${fmt(d.valor_boleto)}</td></tr>\n    </table>\n    <p style=\"margin:0 0 6px;font-size:13px;font-weight:bold;color:#333;\">Itens recorrentes</p>\n    <p style=\"margin:2px 0;font-size:13px;\">• Mensalidade do plano: <strong>${fmt(dados.assinatura.valor_negociado)}</strong></p>\n    ${extrasLinhas}\n    ${aviso}\n    <p style=\"margin:20px 0 6px;\"><a href=\"${d.link_boleto || '#'}\" style=\"display:inline-block;background:#E8A317;color:#fff;padding:11px 22px;text-decoration:none;border-radius:5px;font-size:14px;font-weight:bold;margin:0 8px 8px 0;\">Ver 1º boleto</a>${urlCliente ? '<a href=\"'+urlCliente+'\" style=\"display:inline-block;background:#fff;color:#C8860B;border:1px solid #E8A317;padding:10px 22px;text-decoration:none;border-radius:5px;font-size:14px;font-weight:bold;\">Ver cliente no Superlógica</a>' : ''}</p>\n    <p style=\"margin:18px 0 0;font-size:11px;color:#999;\">Proposta ${dados.proposta_id} • cadastro automático</p>\n  </div>\n</div>`;\n\nconst assunto = `Cadastro Superlógica: ${dados.cliente.razao_social}`;\nreturn [{ json: { html, assunto } }];"
+      },
+      "id": "2d88dcd5-0e8a-4f80-9025-2073484599ee",
+      "name": "Monta confirmação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4768,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "sendTo": "financeiro@example.com",
+        "subject": "={{ $json.assunto }}",
+        "message": "={{ $json.html }}",
+        "responseType": "customForm",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Nota Fiscal",
+              "fieldType": "file",
+              "acceptFileTypes": ".pdf"
+            },
+            {
+              "fieldLabel": "Serasa",
+              "fieldType": "file",
+              "acceptFileTypes": ".pdf"
+            },
+            {
+              "fieldLabel": "Boleto",
+              "fieldType": "file",
+              "acceptFileTypes": ".pdf"
+            }
+          ]
+        },
+        "options": {
+          "messageButtonLabel": "Anexar NF, Serasa e Boleto (se houver)",
+          "responseFormButtonLabel": "Enviar",
+          "limitWaitTime": {
+            "values": {
+              "resumeAmount": 7,
+              "resumeUnit": "days"
+            }
+          }
+        }
+      },
+      "id": "e9613208-0e79-4651-aa1c-61f7ad0e6cb0",
+      "name": "Envia confirmação",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        4992,
+        1520
+      ],
+      "webhookId": "e2d80d5b-8463-4259-a84d-277ea23f200f",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CRED_GMAIL",
+          "name": "Gmail (financeiro)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Cadastro do Superlógica\n\n**Cadastro no Superlógica:**\n6) Com o ID respondido: busca a proposta e cadastra o CLIENTE.\n7) Cadastra a ASSINATURA (plano base + extras + adesão) com o valor negociado.\n8) Envia e-mail de confirmação.",
+        "height": 188,
+        "width": 480,
+        "color": 5
+      },
+      "id": "7ef62705-a6b6-4a44-af3a-a261363e2bb9",
+      "name": "LEIA-ME1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1968,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "additionalFields": {
+          "deal_id": "={{ $json.deal_id }}"
+        }
+      },
+      "id": "a853aa37-70ca-485a-9f43-fd7eb09a0bff",
+      "name": "Sobe no Pipedrive",
+      "type": "n8n-nodes-base.pipedrive",
+      "typeVersion": 1,
+      "position": [
+        5664,
+        1520
+      ],
+      "credentials": {
+        "pipedriveApi": {
+          "id": "CRED_PIPEDRIVE",
+          "name": "Pipedrive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const cnpja = (() => { try { return $('Consulta cnpja').first().json || {}; } catch(e){ return {}; } })();\nconst company = cnpja.company || {};\nconst razao = company.name || 'Empresa';\nlet cnpjDig = '';\ntry { cnpjDig = String($('Valida proposta + extrai CNPJ').first().json.cnpj || '').replace(/\\D/g,''); } catch(e){}\nif (!cnpjDig) cnpjDig = String(cnpja.taxId || cnpja.tax_id || '').replace(/\\D/g,'');\nconst fmtCnpj = d => d.length===14 ? d.replace(/^(\\d{2})(\\d{3})(\\d{3})(\\d{4})(\\d{2})$/,'$1.$2.$3/$4-$5') : (d||'-');\nconst capital = (company.equity!=null) ? ('R$ ' + Number(company.equity).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})) : '-';\nconst membros = (company.members||[]).map(m => ({ nome:(m.person&&m.person.name)||'', papel:(m.role&&m.role.text)||'', cod:(m.role&&m.role.id)||'' }));\n\nconst SMAP = { '—':'\\x97','–':'\\x96','’':'\\x92','‘':'\\x91','“':'\\x93','”':'\\x94','•':'\\x95','…':'\\x85' };\nconst sanitize = s => { let o=''; for (const ch of String(s)){ if(SMAP[ch]) o+=SMAP[ch]; else if(ch.charCodeAt(0)<=255) o+=ch; else o+='?'; } return o; };\nconst escPdf = s => sanitize(s).replace(/\\\\/g,'\\\\\\\\').replace(/\\(/g,'\\\\(').replace(/\\)/g,'\\\\)');\nconst HW = {32:278,33:278,34:355,35:556,36:556,37:889,38:667,39:191,40:333,41:333,42:389,43:584,44:278,45:333,46:278,47:278,48:556,49:556,50:556,51:556,52:556,53:556,54:556,55:556,56:556,57:556,58:278,59:278,60:584,61:584,62:584,63:556,64:1015,65:667,66:667,67:722,68:722,69:667,70:611,71:778,72:722,73:278,74:500,75:667,76:556,77:833,78:722,79:778,80:667,81:778,82:722,83:667,84:611,85:722,86:667,87:944,88:667,89:667,90:611,91:278,92:278,93:278,94:469,95:556,96:333,97:556,98:556,99:500,100:556,101:556,102:278,103:556,104:556,105:222,106:222,107:500,108:222,109:833,110:556,111:556,112:556,113:556,114:333,115:500,116:278,117:556,118:500,119:722,120:500,121:500,122:500,123:334,124:260,125:334,126:584};\nconst charW = c => (HW[c]!==undefined?HW[c]:556);\nconst textW = (t,size,bold) => { let w=0; for(let i=0;i<t.length;i++) w+=charW(t.charCodeAt(i)); return w/1000*size*(bold?1.06:1); };\nconst wrap = (text,maxW,size,bold) => { const out=[]; for(const word of String(text).split(/\\s+/)){ if(!out.length){out.push(word);continue;} const t=out[out.length-1]+' '+word; if(textW(t,size,bold)<=maxW) out[out.length-1]=t; else out.push(word);} return out.length?out:['']; };\n\nconst PAGE_W=595.28, PAGE_H=841.89, MARGIN=48;\nconst pages=[]; let ops=[]; let y;\nconst newPage=()=>{ if(ops.length) pages.push(ops); ops=[]; y=PAGE_H-MARGIN; };\nnewPage();\nconst rgb=hex=>{const n=parseInt(hex.slice(1),16);return [(n>>16&255)/255,(n>>8&255)/255,(n&255)/255];};\nconst fill=hex=>{const a=rgb(hex);return a[0].toFixed(3)+' '+a[1].toFixed(3)+' '+a[2].toFixed(3)+' rg';};\nconst rect=(x,yy,w,h,hex)=>ops.push(fill(hex)+' '+x.toFixed(2)+' '+yy.toFixed(2)+' '+w.toFixed(2)+' '+h.toFixed(2)+' re f');\nconst drawText=(x,yy,t,size,bold,hex)=>ops.push('BT /'+(bold?'F2':'F1')+' '+size+' Tf '+fill(hex||'#1f2937')+' '+x.toFixed(2)+' '+yy.toFixed(2)+' Td ('+escPdf(t)+') Tj ET');\nconst para=(text,opt)=>{ opt=opt||{}; const size=opt.size||10,bold=!!opt.bold,color=opt.color||'#1f2937',indent=opt.indent||0,gap=(opt.gap!=null?opt.gap:5),lh=opt.lh||1.4; const blocks=String(text==null?'':text).split('\\n'); const tx=MARGIN+indent, maxW=PAGE_W-MARGIN-tx; blocks.forEach(blk=>{ wrap(blk,maxW,size,bold).forEach(ln=>{ if(y<MARGIN+28) newPage(); drawText(tx,y-size,ln,size,bold,color); y-=size*lh; }); }); y-=gap; };\n\nrect(MARGIN, y-64, PAGE_W-2*MARGIN, 64, '#E8A317');\ndrawText(MARGIN+16, y-26, sanitize('QUADRO DE SOCIOS E ADMINISTRADORES (QSA)'), 11, true, '#ffffff');\ndrawText(MARGIN+16, y-48, sanitize(razao), 15, true, '#ffffff');\ny -= 64+20;\n\npara('CNPJ: '+fmtCnpj(cnpjDig), {bold:true, size:11, gap:3});\npara('Nome empresarial: '+razao, {bold:true, size:11, gap:3});\npara('Capital social: '+capital, {bold:true, size:11, gap:10});\npara('O Quadro de Socios e Administradores (QSA) constante da base de dados do CNPJ e o seguinte:', {size:10, color:'#555555', gap:10});\n\nif (membros.length){\n  membros.forEach(m=>{\n    para('Nome: '+(m.nome||'-'), {bold:true, size:11, gap:1});\n    para('Qualificacao: '+(m.cod?m.cod+'-':'')+(m.papel||'-'), {size:10, color:'#1e3a8a', gap:8});\n  });\n} else {\n  para('Nenhum socio retornado.', {color:'#9ca3af'});\n}\n\ny-=6;\npara('Documento gerado automaticamente a partir de dados publicos (Receita/cnpja). Para fins oficiais, emitir na Receita Federal.', {size:8, color:'#9ca3af'});\n\nnewPage();\n\nconst N=4+pages.length*2; const body=new Array(N+1);\nbody[1]='<< /Type /Catalog /Pages 2 0 R >>';\nbody[2]='<< /Type /Pages /Kids ['+pages.map((_,i)=>(6+i*2)+' 0 R').join(' ')+'] /Count '+pages.length+' >>';\nbody[3]='<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';\nbody[4]='<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';\npages.forEach((pOps,i)=>{ const content=pOps.join('\\n'); const cNum=5+i*2,pNum=6+i*2; body[cNum]='<< /Length '+content.length+' >>\\nstream\\n'+content+'\\nendstream'; body[pNum]='<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+PAGE_W+' '+PAGE_H+'] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents '+cNum+' 0 R >>'; });\nlet pdf='%PDF-1.4\\n%\\xE2\\xE3\\xCF\\xD3\\n'; const offsets=[];\nfor(let i=1;i<=N;i++){ offsets[i]=pdf.length; pdf+=i+' 0 obj\\n'+body[i]+'\\nendobj\\n'; }\nconst xrefStart=pdf.length; pdf+='xref\\n0 '+(N+1)+'\\n0000000000 65535 f \\n';\nfor(let i=1;i<=N;i++) pdf+=String(offsets[i]).padStart(10,'0')+' 00000 n \\n';\npdf+='trailer\\n<< /Size '+(N+1)+' /Root 1 0 R >>\\nstartxref\\n'+xrefStart+'\\n%%EOF';\n\nconst fileName = ('QSA - '+razao).replace(/[\\\\/:*?\"<>|]/g,' ').trim().slice(0,80) + '.pdf';\nreturn [{ json: { qsa_gerado: true, fileName }, binary: { data: { data: Buffer.from(pdf,'latin1').toString('base64'), mimeType:'application/pdf', fileName, fileExtension:'pdf' } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5216,
+        1520
+      ],
+      "id": "c84113ce-2a6e-4356-a28c-4699c85b3355",
+      "name": "Gera PDF do QSA"
+    },
+    {
+      "parameters": {
+        "jsCode": "let dealId = '';\ntry { dealId = String($('Busca proposta cadastro').first().json.deal_id || ''); } catch(e){}\nlet razao = 'Cliente';\ntry { razao = $('Monta dados + de-para').first().json.cliente.razao_social || 'Cliente'; } catch(e){}\nconst safe = s => String(s||'').replace(/[\\\\/:*?\"<>|]/g,' ').trim().slice(0,60);\nconst itens = [];\nfunction add(bin, nome){ if (bin && bin.data) itens.push({ json: { deal_id: dealId, fileName: nome }, binary: { data: bin } }); }\n// D4Sign (auto)\ntry { const b = $('Baixa o PDF (binario)').first().binary; if (b && b.data) add(b.data, 'D4Sign - '+safe(razao)+'.pdf'); } catch(e){}\n// QSA (auto)\ntry { const b = $('Gera PDF do QSA').first().binary; if (b && b.data) add(b.data, 'QSA - '+safe(razao)+'.pdf'); } catch(e){}\n// NF + Serasa + Boleto (anexados pelo financeiro no e-mail)\ntry { const b = $('Envia confirmação').first().binary || {}; for (const k of Object.keys(b)) { if (b[k] && b[k].data) add(b[k], b[k].fileName || (k+'.pdf')); } } catch(e){}\nreturn itens.length ? itens : [{ json: { deal_id: dealId, aviso: 'nenhum anexo' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5440,
+        1520
+      ],
+      "id": "1e241898-2184-4837-af29-ef8e8daecf5c",
+      "name": "Prepara anexos"
+    },
+    {
+      "parameters": {
+        "jsCode": "const itens = $input.all();\nconst dealId = (itens[0] && itens[0].json && itens[0].json.deal_id) || '';\nlet razao = 'Cliente';\ntry { razao = $('Monta dados + de-para').first().json.cliente.razao_social || 'Cliente'; } catch(e){}\nconst nomes = itens.map(i => i.json && i.json.fileName).filter(Boolean);\nconst urlDeal = dealId ? ('https://suaempresa.pipedrive.com/deal/' + dealId) : '';\nconst linhas = nomes.map(n => `<p style=\"margin:2px 0;font-size:13px;\">• ${n}</p>`).join('');\nconst html = `<div style=\"max-width:560px;margin:0 auto;font-family:Arial,Helvetica,sans-serif;color:#2b2b2b;text-align:left;border:1px solid #e6e6e6;border-radius:8px;overflow:hidden;\">\n  <div style=\"background:#E8A317;padding:16px 20px;\"><span style=\"color:#fff;font-size:18px;font-weight:bold;\">✅ Documentos anexados no Pipedrive</span></div>\n  <div style=\"padding:20px;\">\n    <p style=\"margin:0 0 8px;font-size:14px;\"><strong>${razao}</strong></p>\n    <p style=\"margin:0 0 10px;font-size:13px;color:#555;\">Foram anexados ${nomes.length} documento(s) no Negócio:</p>\n    ${linhas}\n    ${urlDeal ? `<p style=\"margin:20px 0 0;\"><a href=\"${urlDeal}\" style=\"display:inline-block;background:#E8A317;color:#fff;padding:11px 22px;text-decoration:none;border-radius:5px;font-size:14px;font-weight:bold;\">Abrir Negócio no Pipedrive</a></p>` : ''}\n  </div>\n</div>`;\nconst assunto = `✅ Documentos anexados no Pipedrive — ${razao}`;\nreturn [{ json: { html, assunto } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5888,
+        1520
+      ],
+      "id": "22d50e70-a2df-48df-a6c3-a39d4bacf492",
+      "name": "Monta e-mail final"
+    },
+    {
+      "parameters": {
+        "sendTo": "financeiro@example.com",
+        "subject": "={{ $json.assunto }}",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        6112,
+        1520
+      ],
+      "id": "2d5336f2-78c1-4007-9d67-644873064d1b",
+      "name": "Envia resumo Pipedrive",
+      "webhookId": "06bb82b7-1abd-4e92-8e13-2da813428c92",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CRED_GMAIL",
+          "name": "Gmail (financeiro)"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "4d0b1992-cddb-49e3-8bd7-396a59a1b3c3",
+      "name": "Ignorar",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        816,
+        1952
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f982b3cb-938b-45c3-a590-ca0a0d78c77c",
+              "leftValue": "={{ $json.propostaOk }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        576,
+        1808
+      ],
+      "id": "7d1d3e7d-c29f-4e02-aed2-7c13f899e4db",
+      "name": "Proposta ok?"
+    },
+    {
+      "parameters": {
+        "dataToSave": {
+          "values": [
+            {
+              "key": "uuid",
+              "value": "={{ $json.uuid }}"
+            },
+            {
+              "key": "ehAssinatura",
+              "value": "={{ `${$json.ehAssinatura}` }}"
+            },
+            {
+              "key": "ehCliente",
+              "value": "={{ `${$json.ehCliente}` }}"
+            },
+            {
+              "key": "processar",
+              "value": "={{ `${$json.processar}` }}"
+            },
+            {
+              "key": "signerEmail",
+              "value": "={{ $json.signerEmail }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executionData",
+      "typeVersion": 1.1,
+      "position": [
+        -736,
+        1952
+      ],
+      "id": "1815961f-ccad-494d-853a-7d02e72f1613",
+      "name": "Salvar metadados do evento"
+    },
+    {
+      "parameters": {
+        "dataToSave": {
+          "values": [
+            {
+              "key": "razao",
+              "value": "={{ $('Limpar os dados').item.json.razao }}"
+            },
+            {
+              "key": "cnpj",
+              "value": "={{ $('Limpar os dados').item.json.cnpj }}"
+            },
+            {
+              "key": "vendedor",
+              "value": "={{ $('Limpar os dados').item.json.vendedor }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executionData",
+      "typeVersion": 1.1,
+      "position": [
+        2528,
+        1664
+      ],
+      "id": "a593e82b-95ec-4931-9e00-ef0652163fc7",
+      "name": "Salvar metadados da proposta"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n//  NODE 1 — Coleta  (Run Once for All Items)\n//  Só lê os nodes de origem e devolve o DTO RawData como json.\n//  Este node precisa estar DEPOIS de todos os nodes referenciados abaixo.\n// =====================================================================\n\n// Lê o JSON do primeiro node existente da lista (all=true -> todos os itens)\nfunction getJson(names, all){\n  for (const n of names){\n    try {\n      const nd = $(n);\n      const d = all ? nd.all().map(i=>i.json) : nd.first().json;\n      if(d) return d;\n    } catch(e){}\n  }\n  return all ? [] : {};\n}\n\nconst raw = {\n  pdf:                getJson(['Valida proposta + extrai CNPJ']),\n  cnpja:              getJson(['Consulta cnpja','Consulta cnpja (gratis)']) || {},\n  bill:               getJson(['view_empresa_bill','Banco Acme (pendencia)'], true)[0] || {},\n  signerNodes:        getJson(['D4Sign: lista signatarios'], true),\n  propostaCandidates: [],\n  clientInfo:         {},\n};\n\ntry { raw.propostaCandidates = $('Busca propostas do cliente').all().map(i=>i.json).filter(p=>p && p.id); } catch(e){}\ntry { raw.clientInfo         = $('Pega e-mail do cliente').first().json || {}; } catch(e){}\n\nreturn [{ json: raw }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1904,
+        1664
+      ],
+      "id": "c9a42dcb-cc41-403b-8690-32c5a3d1d198",
+      "name": "Centralizar dados"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n//  NODE 3 — HTML  (Run Once for All Items)\n//  Recebe EmailContext do Node 2 e monta o e-mail.\n//  Devolve { assunto, html, tudoOk, temPendencia }.\n//  OBS: atributos HTML usam aspas simples de propósito, p/ o JSON de\n//  saída não escapar aspas (nada de \\\" na saída).\n// =====================================================================\n\n// ---------- utilitários de formatação ----------\nconst fmtCnpj = c => {\n  const d = (c||'').toString().replace(/\\D/g,'');\n  return d.length===14 ? d.replace(/^(\\d{2})(\\d{3})(\\d{3})(\\d{4})(\\d{2})$/,'$1.$2.$3/$4-$5') : (c||'');\n};\n\nconst fmtData = d => {\n  if(!d) return '';\n  const dt = new Date(d);\n  return isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('pt-BR');\n};\n\n// ---------- render ----------\nconst ctx = $input.first().json;\n\nconst stMap = {1:'Gerado',2:'Enviado',3:'Expirado',4:'Renegociado',5:'Ganho',6:'Perdido'};\nconst H3  = 'color:#C8860B;font-size:15px;margin:16px 0 6px;';\nconst SUB = 'color:#1a1a1a;font-size:13px;font-weight:bold;margin:8px 0 2px;';\n\nconst linha = (ok, texto) => `<p style='margin:4px 0;'>${ok?'✅':'❌'} ${texto}</p>`;\nconst item  = txt => `<p style='margin:2px 0 2px 14px;'>• ${txt}</p>`;\n\nconst membros    = ctx.membros    || [];\nconst assinantes = ctx.assinantes || [];\nconst propostas  = ctx.propostas  || [];\n\nconst sociosHtml = membros.length\n  ? membros.map(m => item(`${m.nome}${m.papel?(\" <span style='color:#777;font-size:12px;'>(\"+m.papel+\")</span>\"):\"\"}`)).join('')\n  : \"<p style='margin:2px 0 2px 14px;color:#777;'>—</p>\";\n\nconst assinouHtml = assinantes.length\n  ? assinantes.map(a => item(`${a.nome||'—'}${a.email?(\" <span style='color:#777;font-size:12px;'>(\"+a.email+\")</span>\"):\"\"}`)).join('')\n  : \"<p style='margin:2px 0 2px 14px;color:#777;'>—</p>\";\n\nconst listaHtml = propostas.length\n  ? propostas.map((p,i) => `<p style='margin:6px 0 6px 14px;'>• Proposta <b>${p.id}</b>${(i===0 && propostas.length>1)?\" <span style='color:#1f9d57;font-size:12px;'>(mais recente)</span>\":\"\"} — ${p.plano||'-'} — R$ ${Number(p.valor||0).toFixed(2)}<br><span style='color:#777;font-size:12px;'>${p.organizacao||''}${p.data?(' · '+fmtData(p.data)):''}${p.status_id?(' · '+(stMap[p.status_id]||'')):''}</span></p>`).join('')\n    + `<p style='margin:10px 0;color:#444;'>Informe o <b>ID da proposta</b> correta (ex: ${propostas[0].id}).</p>`\n  : \"<p style='margin:12px 0;color:#b00000;'>⚠️ Nenhuma proposta encontrada — verifique no GPC.</p>\";\n\nconst cnpjDig  = String(ctx.cnpj||'').replace(/\\D/g,'');\nconst urlCnpja = cnpjDig ? ('https://cnpja.com/office/'+cnpjDig) : '';\n\nconst html = `<div style='font-family:Arial,Helvetica,sans-serif;color:#333;font-size:14px;line-height:1.5;max-width:560px;margin:0 auto;border:1px solid #EFE2C2;border-radius:8px;overflow:hidden;'>\n<div style='background:#E8A317;padding:16px 20px;'><span style='color:#fff;font-size:18px;font-weight:bold;'>Validação de contratação</span></div>\n<div style='padding:20px;text-align:left;'>\n<h2 style='color:#1a1a1a;font-size:16px;margin:0 0 12px;'>${ctx.razao}</h2>\n\n<h3 style='${H3}'>Empresa</h3>\n<p style='margin:3px 0;'><b>Razão social:</b> ${ctx.razao||'—'}</p>\n<p style='margin:3px 0;'><b>CNPJ:</b> ${fmtCnpj(ctx.cnpj)}${urlCnpja?(\" &nbsp;·&nbsp; <a href='\"+urlCnpja+\"' style='color:#C8860B;'>abrir no CNPJá</a>\"):\"\"}</p>\n<p style='margin:3px 0;'><b>Status na Receita:</b> ${ctx.statusReceita||'—'}</p>\n\n<h3 style='${H3}'>Validações</h3>\n${linha(ctx.propostaOk, 'Proposta anexada' + (ctx.propostaOk?'':' (faltam: '+(ctx.palavrasFaltando||[]).join(', ')+')'))}\n${linha(ctx.ativaOk, 'Empresa ativa')}\n${linha(ctx.semPendencia, 'Sem pendência financeira' + (ctx.temPendencia?' ⚠️ TRAVAR — empresa inadimplente':''))}\n${linha(ctx.socioOk, 'Assinatura' + (ctx.socioPapel?' ('+ctx.socioPapel+')':''))}\n\n<h3 style='${H3}'>Sócios</h3>\n${sociosHtml}\n\n<h3 style='${H3}'>Quem assinou</h3>\n${assinouHtml}\n\n<h3 style='${H3}'>${ctx.enderecoOk?'✅':'❌'} Endereço</h3>\n<p style='${SUB}'>Receita</p>\n<p style='margin:2px 0 2px 14px;'>${ctx.enderecoReceita||'—'}</p>\n<p style='${SUB}'>Proposta</p>\n<p style='margin:2px 0 2px 14px;'>${ctx.enderecoProposta||'—'}</p>\n\n<h3 style='${H3}'>Propostas deste cliente</h3>\n${listaHtml}\n\n<p style='margin:16px 0 0;'><b>Vendedor:</b> ${ctx.vendedor || '—'}</p>\n</div>\n</div>`.replace(/\\n\\s*/g,'');\n\nconst tudoOk  = ctx.propostaOk && ctx.socioOk && ctx.ativaOk && ctx.enderecoOk && ctx.semPendencia;\nconst assunto = `${tudoOk?'✅':'⚠️'} Validação de contratação — ${ctx.razao}`;\n\nreturn [{ json: { assunto, html, tudoOk, temPendencia: ctx.temPendencia } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2320,
+        1664
+      ],
+      "id": "d54d8309-cecd-4cbf-8ca2-9f8dc6341816",
+      "name": "Gerar html"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n//  NODE 2 — Limpeza  (Run Once for All Items)\n//  Recebe RawData do Node 1, normaliza / cruza dados e calcula as\n//  validações. Devolve o DTO EmailContext como json.\n// =====================================================================\n\n// ---------- utilitários ----------\nconst norm = s => (s||'').toString()\n  .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')\n  .toUpperCase().replace(/[^A-Z0-9 ]/g,' ').replace(/\\s+/g,' ').trim();\n\nfunction normTel(s){\n  let d = String(s||'').replace(/\\D/g,'');\n  if(d.length>11 && d.startsWith('55')) d = d.slice(2);\n  return d.replace(/^0+/,'');\n}\n\n// achata as várias formas que o node do D4Sign pode retornar\nfunction flattenSigners(nodes){\n  const out = [];\n  for (const r of (nodes||[])){\n    if(!r) continue;\n    if(Array.isArray(r.list))    out.push(...r.list);\n    else if(r.user_name)         out.push(r);\n    else if(Array.isArray(r))    out.push(...r);\n  }\n  return out;\n}\n\n// procura o 1o assinante que também esteja no quadro societário\nfunction matchSocio(clienteSigners, membros){\n  for (const cs of clienteSigners){\n    const csn = norm(cs.user_name);\n    const hit = membros.find(m => {\n      const mn = norm(m.nome);\n      return csn && mn && (mn.includes(csn) || csn.includes(mn));\n    });\n    if(hit) return hit;\n  }\n  return null;\n}\n\n// escolhe as propostas do cliente por prioridade: e-mail > telefone > domínio > razão > todas\nfunction selectPropostas(cand, clientInfo){\n  cand = cand || [];\n  const emailsPdf    = (clientInfo.emailsPdf||[]).map(e=>(e||'').toLowerCase());\n  const telefonesPdf = (clientInfo.telefonesPdf||[]);\n  const dominiosPdf  = (clientInfo.dominiosPdf||[]).map(d=>(d||'').toLowerCase());\n  const razaoCli     = norm(clientInfo.razao);\n\n  const stopw  = ['LTDA','ME','EPP','SA','EIRELI','EIRELLI','DE','DA','DO','DOS','DAS','E'];\n  const tokens = razaoCli.split(' ').filter(w=>w.length>=3 && !stopw.includes(w)).slice(0,2);\n\n  const telMatch = p => {\n    const g = normTel(p.telefone);\n    if(!g) return false;\n    return telefonesPdf.some(t0 => {\n      const t = normTel(t0);\n      if(!t) return false;\n      if(g===t) return true;\n      if(g.slice(-8)===t.slice(-8) && g.slice(0,2)===t.slice(0,2)) return true;\n      if(g.endsWith(t) || t.endsWith(g)) return true;\n      return false;\n    });\n  };\n  const domMatch = p => {\n    const d = ((p.email||'').toLowerCase().split('@')[1]) || '';\n    return d && dominiosPdf.includes(d);\n  };\n\n  const porEmail    = cand.filter(p => emailsPdf.includes((p.email||'').toLowerCase()));\n  const porTelefone = cand.filter(telMatch);\n  const porDominio  = cand.filter(domMatch);\n  const porRazao    = cand.filter(p => tokens.length && tokens.every(t => norm(p.organizacao).includes(t)));\n\n  return porEmail.length ? porEmail\n       : porTelefone.length ? porTelefone\n       : porDominio.length ? porDominio\n       : porRazao.length ? porRazao\n       : cand;\n}\n\n// ---------- limpeza ----------\nconst raw   = $input.first().json;\nconst pdf   = raw.pdf   || {};\nconst cnpja = raw.cnpja || {};\nconst bill  = raw.bill  || {};\n\nconst ctx = {};\n\n// assinantes (só do cliente e que já assinaram)\nconst clienteSigners = flattenSigners(raw.signerNodes).filter(s =>\n  s && s.email &&\n  !/@example\\.com$/i.test((s.email||'').trim()) &&\n  (s.signed==='1' || s.signed===1)\n);\nctx.assinantes = clienteSigners.map(s => ({ nome:s.user_name||'', email:s.email||'' }));\n\n// status na Receita\nctx.statusReceita = (cnpja.status && cnpja.status.text) || '';\nctx.ativaOk       = /ATIVA/i.test(ctx.statusReceita);\n\n// quadro societário + match do assinante\nctx.membros = ((cnpja.company && cnpja.company.members) || [])\n  .map(m => ({ nome:(m.person&&m.person.name)||'', papel:(m.role&&m.role.text)||'' }));\nconst socio = matchSocio(clienteSigners, ctx.membros);\nctx.socioOk    = !!socio;\nctx.socioPapel = socio ? socio.papel : '';\n\n// endereço (Receita x Proposta)\nconst end = cnpja.address || {};\nctx.enderecoReceita  = [end.street,end.number,end.district,end.city,end.state,end.zip].filter(Boolean).join(' ');\nctx.enderecoProposta = (pdf.enderecoPdf||'').trim();\nctx.enderecoOk       = norm(pdf.enderecoPdf).length>0 && norm(ctx.enderecoReceita).includes(norm(end.street||''));\n\n// pendência financeira\nctx.temPendencia = Number(bill.vlr_inad||0) !== 0;\nctx.semPendencia = !ctx.temPendencia;\n\n// identidade / proposta\nctx.razao            = (cnpja.company && cnpja.company.name) || pdf.razaoPdf || bill.nome_empresa || '';\nctx.cnpj             = pdf.cnpj || '';\nctx.propostaOk       = !!pdf.propostaOk;\nctx.palavrasFaltando = pdf.palavrasFaltando || [];\nctx.vendedor         = pdf.vendedor || '';\n\n// propostas do cliente\nctx.propostas = selectPropostas(raw.propostaCandidates, raw.clientInfo || {});\n\nreturn [{ json: ctx }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        1664
+      ],
+      "id": "a546681b-15e3-455f-9379-40dc94285177",
+      "name": "Limpar os dados"
+    }
+  ],
+  "pinData": {
+    "Webhook D4Sign (assinatura)": [
+      {
+        "json": {
+          "headers": {
+            "connection": "upgrade",
+            "host": "n8n.example.com",
+            "x-real-ip": "0.0.0.0",
+            "x-forwarded-for": "0.0.0.0",
+            "x-forwarded-proto": "https",
+            "content-length": "531",
+            "x-forwarded-port": "443",
+            "x-amzn-trace-id": "",
+            "accept": "*/*",
+            "x-d4sign": "true",
+            "content-hmac": "",
+            "content-type": "multipart/form-data; boundary=------------------------bZE7A1noU8hsMDG01SeM5S"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "uuid": "00000000-0000-0000-0000-000000000000",
+            "type_post": "4",
+            "message": "Signed",
+            "email": "cliente@example.com"
+          },
+          "webhookUrl": "https://n8n.example.com/webhook/d4sign-assinatura",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook D4Sign (assinatura)": {
+      "main": [
+        [
+          {
+            "node": "Parse evento + filtro cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse evento + filtro cliente": {
+      "main": [
+        [
+          {
+            "node": "Salvar metadados do evento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Foi o cliente?": {
+      "main": [
+        [
+          {
+            "node": "D4Sign: pega URL do PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ignorar (interno/evento)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "D4Sign: pega URL do PDF": {
+      "main": [
+        [
+          {
+            "node": "Baixa o PDF (binario)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixa o PDF (binario)": {
+      "main": [
+        [
+          {
+            "node": "Extrai texto do PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai texto do PDF": {
+      "main": [
+        [
+          {
+            "node": "Valida proposta + extrai CNPJ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valida proposta + extrai CNPJ": {
+      "main": [
+        [
+          {
+            "node": "Proposta ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consulta cnpja": {
+      "main": [
+        [
+          {
+            "node": "view_empresa_bill",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "view_empresa_bill": {
+      "main": [
+        [
+          {
+            "node": "D4Sign: lista signatarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "D4Sign: lista signatarios": {
+      "main": [
+        [
+          {
+            "node": "Pega e-mail do cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pega e-mail do cliente": {
+      "main": [
+        [
+          {
+            "node": "Busca propostas do cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca propostas do cliente": {
+      "main": [
+        [
+          {
+            "node": "Centralizar dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envia validação ao financeiro": {
+      "main": [
+        [
+          {
+            "node": "Lê resposta (ID proposta)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lê resposta (ID proposta)": {
+      "main": [
+        [
+          {
+            "node": "Tem ID da proposta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem ID da proposta?": {
+      "main": [
+        [
+          {
+            "node": "Busca proposta cadastro",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ignorar (sem ID)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca proposta cadastro": {
+      "main": [
+        [
+          {
+            "node": "Busca extras cadastro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca extras cadastro": {
+      "main": [
+        [
+          {
+            "node": "Monta dados + de-para",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta dados + de-para": {
+      "main": [
+        [
+          {
+            "node": "Cadastra cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cadastra cliente": {
+      "main": [
+        [
+          {
+            "node": "Monta body assinatura",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta body assinatura": {
+      "main": [
+        [
+          {
+            "node": "Cadastra assinatura (base+extras+adesao)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cadastra assinatura (base+extras+adesao)": {
+      "main": [
+        [
+          {
+            "node": "Monta confirmação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta confirmação": {
+      "main": [
+        [
+          {
+            "node": "Envia confirmação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envia confirmação": {
+      "main": [
+        [
+          {
+            "node": "Gera PDF do QSA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gera PDF do QSA": {
+      "main": [
+        [
+          {
+            "node": "Prepara anexos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara anexos": {
+      "main": [
+        [
+          {
+            "node": "Sobe no Pipedrive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sobe no Pipedrive": {
+      "main": [
+        [
+          {
+            "node": "Monta e-mail final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta e-mail final": {
+      "main": [
+        [
+          {
+            "node": "Envia resumo Pipedrive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Proposta ok?": {
+      "main": [
+        [
+          {
+            "node": "Consulta cnpja",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ignorar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar metadados do evento": {
+      "main": [
+        [
+          {
+            "node": "Foi o cliente?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Centralizar dados": {
+      "main": [
+        [
+          {
+            "node": "Limpar os dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar html": {
+      "main": [
+        [
+          {
+            "node": "Salvar metadados da proposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpar os dados": {
+      "main": [
+        [
+          {
+            "node": "Gerar html",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar metadados da proposta": {
+      "main": [
+        [
+          {
+            "node": "Envia validação ao financeiro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "c35a1eb8-3fb7-497a-9771-2aa2fc3570f9",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "REDACTED_INSTANCE_ID"
+  },
+  "id": "wNF2Mwl7ZUOhQu12",
+  "tags": []
+}

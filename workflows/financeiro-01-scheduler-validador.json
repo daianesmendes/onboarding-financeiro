@@ -1,0 +1,183 @@
+{
+  "name": "Financeiro - Novas contratações - SCHEDULER",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## SCHEDULER - Validador de novas contratações\n\nA cada 5 min este fluxo:\n1) lista os documentos do D4Sign\n2) filtra os que ainda estão aguardando assinatura\n3) cadastra o webhook de assinatura em cada um (apontando para o fluxo principal)\n\n",
+        "height": 208,
+        "width": 480,
+        "color": 5
+      },
+      "id": "1cde7b61-0bd8-4f6b-bd77-dfb80bf299c6",
+      "name": "LEIA-ME",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        128,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "ef7e850e-b704-4f02-87d9-a8aa9762dfcb",
+      "name": "A cada 5 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -16,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://secure.d4sign.com.br/api/v1/documents",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {}
+      },
+      "id": "081cbdee-903e-4bdf-9d90-6ee7c806b7a7",
+      "name": "D4Sign: lista documentos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        208,
+        352
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "CRED_D4SIGN",
+          "name": "D4Sign API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://secure.d4sign.com.br/api/v1/documents/{{ $json.uuid }}/webhooks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "https://n8n.example.com/webhook/d4sign-assinatura"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a5e351e2-035c-4f43-b557-694950817b7f",
+      "name": "Registra webhook no documento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        656,
+        352
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "CRED_D4SIGN",
+          "name": "D4Sign API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Memória que persiste entre execuções do workflow\nconst staticData = $getWorkflowStaticData('global');\nconst hooked = staticData.hooked || {};\n\nconst out = [];\nfor (const it of $input.all()) {\n  const d = it.json;\n  const uuid   = d.uuidDoc || d.uuid || '';\n  const status = (d.statusName || '').toString();\n  const cofre  = (d.safeName || '').toString();\n  if (!uuid) continue;                            // pula paginação\n  if (cofre !== 'Acme') continue;           // só contratos de cliente\n  if (/finaliz|cancel/i.test(status)) continue;   // já assinado/cancelado\n  if (hooked[uuid]) continue;                     // 🔑 já registramos antes → pula\n  hooked[uuid] = true;                            // marca como registrado\n  out.push({ json: { uuid, statusName: status, nameDoc: d.nameDoc || '' } });\n}\n\nstaticData.hooked = hooked;   // salva a memória\nreturn out;"
+      },
+      "id": "1dd1140b-83bb-4a98-8e01-278cf6f9ee1f",
+      "name": "Aguardando assinatura",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        352
+      ]
+    }
+  ],
+  "pinData": {
+    "A cada 5 minutos": [
+      {
+        "json": {
+          "timestamp": "2026-06-09T10:15:09.006-03:00",
+          "Readable date": "June 9th 2026, 10:15:09 am",
+          "Readable time": "10:15:09 am",
+          "Day of week": "Tuesday",
+          "Year": "2026",
+          "Month": "June",
+          "Day of month": "09",
+          "Hour": "10",
+          "Minute": "15",
+          "Second": "09",
+          "Timezone": "America/Sao_Paulo (UTC-03:00)"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "A cada 5 minutos": {
+      "main": [
+        [
+          {
+            "node": "D4Sign: lista documentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "D4Sign: lista documentos": {
+      "main": [
+        [
+          {
+            "node": "Aguardando assinatura",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardando assinatura": {
+      "main": [
+        [
+          {
+            "node": "Registra webhook no documento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "64bd6be9-5619-4ae4-aac3-8513e18ead33",
+  "meta": {
+    "instanceId": "REDACTED_INSTANCE_ID"
+  },
+  "id": "OaWrwCPkYU0TXge7",
+  "tags": [
+    {
+      "updatedAt": "2025-05-11T23:58:02.942Z",
+      "createdAt": "2025-05-11T23:58:02.942Z",
+      "id": "Lsfev8wpwjoubMxq",
+      "name": "Financeiro"
+    }
+  ]
+}
